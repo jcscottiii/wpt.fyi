@@ -95,443 +95,40 @@ function isTestMissing(total, status) {
   return status === '' && total === 0
 }
 
-class WPTResults extends AmendMetadataMixin(Pluralizer(WPTColors(WPTFlags(PathInfo(LoadingState(TestRunsUIBase)))))) {
-  static get template() {
-    return html`
-    <style include="wpt-colors">
-      :host {
-        display: block;
-        font-size: 15px;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      tr:nth-child(2n), tr.spec {
-        background-color: var(--paper-grey-200);
-      }
-      tr td {
-        padding: 0.25em 0.5em;
-      }
-      tr.spec td {
-        padding: 0.2em 0.5em;
-        border: solid 1px var(--paper-grey-300);
-      }
-      thead {
-        border-bottom: 8px solid white;
-      }
-      th {
-        background: white;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      path-part {
-        vertical-align: bottom;
-      }
-      .path {
-        margin-bottom: 16px;
-      }
-      .path-separator {
-        padding: 0 0.1em;
-        margin: 0 0.2em;
-      }
-      .top,
-      .delta {
-        background-color: var(--paper-grey-200);
-      }
-      span.delta.regressions {
-        color: var(--paper-red-700);
-      }
-      span.delta.passes {
-        color: var(--paper-green-700);
-      }
-      td.none {
-        visibility: hidden;
-      }
-      td.numbers {
-        white-space: nowrap;
-        color: black;
-      }
-      td[triage] {
-        cursor: pointer;
-      }
-      td[triage]:hover {
-        opacity: 0.7;
-        box-shadow: 5px 5px 5px;
-      }
-      td[selected] {
-        border: 2px solid #000000;
-      }
-      .totals-row {
-        border-top: 4px solid white;
-        padding: 4px;
-      }
-      .yellow-button {
-        color: var(--paper-yellow-500);
-        margin-left: 32px;
-      }
-      .history {
-        margin: 32px 0;
-        text-align: center;
-      }
-      .history h3 span {
-        color: var(--paper-red-500);
-      }
-      #show-history {
-        background: var(--paper-blue-700);
-        color: white;
-      }
-      .test-type {
-        margin-left: 8px;
-        padding: 4px;
-        border-radius: 4px;
-        background-color: var(--paper-blue-100);
-      }
-      @media (max-width: 1200px) {
-        table tr td:first-child::after {
-          content: "";
-          display: inline-block;
-          vertical-align: top;
-          min-height: 30px;
-        }
-      }
-      .sort-col {
-        border-top: 4px solid white;
-        padding: 4px;
-      }
-      .sort-button {
-        margin-left: -15px;
-      }
-      .view-triage {
-        margin-left: 30px;
-      }
-      .pointer {
-        cursor: help;
-      }
-      
-      .channel-area {
-        display: flex;
-        max-width: fit-content;
-        margin-inline: auto;
-        border-radius: 3px;
-        margin-bottom:20px;
-        box-shadow: var(--shadow-elevation-2dp_-_box-shadow);
-      }
+import {LitElement, html, css} from 'lit';
+import {customElement, property, state} from 'lit/decorators.js';
+import {repeat} from 'lit/directives/repeat.js';
+import {ifDefined} from 'lit/directives/if-defined.js';
+import {unsafeHTML} from 'lit/directives/unsafe-html.js';
 
-      .channel-area > paper-button {
-        margin: 0;
-      }
-
-      .channel-area > paper-button:first-of-type {
-        border-top-right-radius: 0;
-        border-bottom-right-radius: 0;
-      }
-
-      .channel-area > paper-button:last-of-type {
-        border-top-left-radius: 0;
-        border-bottom-left-radius: 0;
-      }
-      .unselected {
-        background-color: white;
-      }
-      .selected {
-        background-color: var(--paper-blue-700);
-        color: white;
-      }
-
-      .selected::before {
-        --_size: 1rem;
-        --_half-size: calc(var(--_size) / 2);
-
-        content: "";
-        position: absolute;
-        bottom: calc(var(--_half-size) * -1 + 1px);
-        width: var(--_size);
-        height: var(--_half-size);
-        left: calc(50% - var(--_half-size));
-        background: var(--paper-blue-700);
-        clip-path: polygon(46% 100%, 0 0, 100% 0);
-      }
-    </style>
-
-    <paper-toast id="selected-toast" duration="0">
-      <span>[[triageToastMsg(selectedMetadata.length)]]</span>
-      <paper-button class="view-triage" on-click="openAmendMetadata" raised="[[hasSelections]]" disabled="[[!hasSelections]]">TRIAGE</paper-button>
-    </paper-toast>
-
-    <template is="dom-if" if="[[isInvalidDiffUse(diff, testRuns)]]">
-      <paper-toast id="diffInvalid" duration="0" text="'diff' was requested, but is only valid when comparing two runs." opened>
-        <paper-button onclick="[[dismissToast]]" class="yellow-button">Close</paper-button>
-      </paper-toast>
-    </template>
-
-    <paper-toast id="runsNotInCache" duration="5000" text="One or more of the runs requested is currently being loaded into the cache. Trying again..."></paper-toast>
-
-    <template is="dom-if" if="[[resultsLoadFailed]]">
-      <info-banner type="error">
-        Failed to fetch test runs.
-      </info-banner>
-    </template>
-
-    <template is="dom-if" if="[[queryBuilder]]">
-      <iron-collapse opened="[[editingQuery]]">
-        <test-runs-query-builder query="[[query]]"
-                                 on-submit="[[submitQuery]]">
-        </test-runs-query-builder>
-      </iron-collapse>
-    </template>
-
-    <template is="dom-if" if="[[testRuns]]">
-      <template is="dom-if" if="{{ pathIsATestFile }}">
-        <test-file-results test-runs="[[testRuns]]"
-                           subtest-row-count={{subtestRowCount}}
-                           path="[[path]]"
-                           structured-search="[[structuredSearch]]"
-                           labels="[[labels]]"
-                           products="[[products]]"
-                           diff-run="[[diffRun]]"
-                           is-triage-mode="[[isTriageMode]]"
-                           metadata-map="[[metadataMap]]">
-        </test-file-results>
-      </template>
-    <template is="dom-if" if="[[shouldDisplayToggle(canViewInteropScores, pathIsATestFile)]]">
-      <div class="channel-area">
-        <paper-button id="toggleInterop" class\$="[[ interopButtonClass(view) ]]" on-click="clickInterop">Interop View</paper-button>
-        <paper-button id="toggleDefault" class\$="[[ defaultButtonClass(view) ]]" on-click="clickDefault">Default View</paper-button>
-      </div>
-    </template>
-
-      <template is="dom-if" if="{{ !pathIsATestFile }}">
-        <table>
-          <thead>
-            <tr>
-              <th>Path</th>
-              <template is="dom-repeat" items="[[testRuns]]" as="testRun">
-                <!-- Repeats for as many different browser test runs are available -->
-                <th><test-run test-run="[[testRun]]" show-source show-platform></test-run></th>
-              </template>
-              <template is="dom-if" if="[[diffRun]]">
-                <th>
-                  <test-run test-run="[[diffRun]]"></test-run>
-                  <paper-icon-button icon="filter-list" onclick="[[toggleDiffFilter]]" title="Toggle filtering to only show differences"></paper-icon-button>
-                </th>
-              </template>
-            </tr>
-          </thead>
-
-          <tbody>
-            <template is="dom-if" if="[[displayedNodes]]">
-              <tr class="sort-col">
-                <td>
-                  <paper-icon-button class="sort-button" src=[[getSortIcon(isPathSorted)]] onclick="[[sortTestName]]" aria-label="Sort the test name column"></paper-icon-button>
-                </td>
-                <template is="dom-repeat" items="[[sortCol]]" as="sortItem">
-                  <td>
-                    <paper-icon-button class="sort-button" src=[[getSortIcon(sortItem)]] onclick="[[sortTestResults(index)]]" aria-label="Sort the test result column"></paper-icon-button>
-                  </td>
-                </template>
-              </tr>
-            </template>
-
-            <template is="dom-repeat" items="{{displayedNodes}}" as="node">
-              <tr>
-                <td onclick="[[handleTriageSelect(null, node, testRun)]]" onmouseover="[[handleTriageHover(null, node, testRun)]]">
-                  <path-part
-                      prefix="/results"
-                      path="[[ node.path ]]"
-                      query="{{ query }}"
-                      is-dir="{{ node.isDir }}"
-                      is-triage-mode=[[isTriageMode]]>
-                  </path-part>
-                  <template is="dom-if" if="[[shouldDisplayMetadata(null, node.path, metadataMap)]]">
-                    <a href="[[ getMetadataUrl(null, node.path, metadataMap) ]]" target="_blank"><iron-icon class="bug" icon="bug-report"></iron-icon></a>
-                  </template>
-                  <template is="dom-if" if="[[shouldDisplayTestLabel(node.path, labelMap)]]">
-                    <iron-icon class="bug" icon="label" title="[[getTestLabelTitle(node.path, labelMap)]]"></iron-icon>
-                  </template>
-                </td>
-
-                <template is="dom-repeat" items="[[testRuns]]" as="testRun">
-                  <td class\$="numbers [[ testResultClass(node, index, testRun, 'passes') ]]" onclick="[[handleTriageSelect(index, node, testRun)]]" onmouseover="[[handleTriageHover(index, node, testRun)]]">
-                    <template is="dom-if" if="[[diffRun]]">
-                      <span class\$="passes [[ testResultClass(node, index, testRun, 'passes') ]]">{{ getNodeResultDataByPropertyName(node, index, testRun, 'subtest_passes') }}</span>
-                      /
-                      <span class\$="total [[ testResultClass(node, index, testRun, 'total') ]]">{{ getNodeResultDataByPropertyName(node, index, testRun, 'subtest_total') }}</span>
-                    </template>
-                    <template is="dom-if" if="[[!diffRun]]">
-                      <span class\$="passes [[ testResultClass(node, index, testRun, 'passes') ]]">{{ getNodeResult(node, index) }}</span>
-                      <template is="dom-if" if="[[ shouldDisplayHarnessWarning(node, index) ]]">
-                        <span class="pointer" title\$="Harness [[ getStatusDisplay(node, index) ]]"> ⚠️</span>
-                      </template>
-                    </template>
-                    <template is="dom-if" if="[[shouldDisplayMetadata(index, node.path, metadataMap)]]">
-                      <a href="[[ getMetadataUrl(index, node.path, metadataMap) ]]" target="_blank"><iron-icon class="bug" icon="bug-report"></iron-icon></a>
-                    </template>
-                  </td>
-                </template>
-
-                <template is="dom-if" if="[[diffRun]]">
-                  <td class\$="numbers [[ testResultClass(node, index, diffRun, 'passes') ]]">
-                    <template is="dom-if" if="[[node.diff]]">
-                      <span class="delta passes">{{ getNodeResultDataByPropertyName(node, -1, diffRun, 'passes') }}</span>
-                      /
-                      <span class="delta regressions">{{ getNodeResultDataByPropertyName(node, -1, diffRun, 'regressions') }}</span>
-                      /
-                      <span class="delta total">{{ getNodeResultDataByPropertyName(node, -1, diffRun, 'total') }}</span>
-                    </template>
-                  </td>
-                </template>
-              </tr>
-            </template>
-
-            <template is="dom-if" if="[[ shouldDisplayTotals(displayedTotals, diffRun) ]]">
-              <tr class="totals-row">
-                <td>
-                  <code><strong>[[getTotalText()]]</strong></code>
-                </td>
-                <template is="dom-repeat" items="[[displayedTotals]]" as="columnTotal">
-                  <td class\$="numbers [[ getTotalsClass(columnTotal) ]]">
-                    <span class\$="total [[ getTotalsClass(columnTotal) ]]">{{ getTotalDisplay(columnTotal) }}</span>
-                  </td>
-                </template>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-
-        <template is="dom-if" if="[[noResults]]">
-          <info-banner type="info">
-            No results.
-          </info-banner>
-        </template>
-      </template>
-    </template>
-
-    <template is="dom-if" if="[[pathIsATestFile]]">
-      <div class="history">
-        <template is="dom-if" if="[[!showHistory]]">
-            <paper-button id="show-history" onclick="[[showHistoryClicked()]]" raised>
-              Show history timeline
-            </paper-button>
-        </template>
-        <template is="dom-if" if="[[showHistory]]">
-        <h3>
-          History:
-        </h3>
-        <template is="dom-if" if="[[pathIsATestFile]]">
-        <test-results-history-timeline
-            path="[[path]]"
-            show-test-history="[[showHistory]]"
-            subtest-names="[[subtestNames]]">
-          </test-results-history-timeline>
-        </template>
-      </template>
-      </div>
-    </template>
-
-    <template is="dom-if" if="[[displayMetadata]]">
-      <wpt-metadata products="[[displayedProducts]]"
-                    path="[[path]]"
-                    search-results="[[searchResults]]"
-                    metadata-map="[[metadataMap]]"
-                    label-map="[[labelMap}]]"
-                    triage-notifier="[[triageNotifier]]"></wpt-metadata>
-    </template>
-    <wpt-amend-metadata id="amend" selected-metadata="[[selectedMetadata]]" path="[[path]]"></wpt-amend-metadata>
-`;
-  }
-
-  static get is() {
-    return 'wpt-results';
-  }
-
-  static get properties() {
-    return {
-      path: {
-        type: String,
-        observer: 'pathUpdated',
-        notify: true,
-      },
-      pathIsASubfolderOrFile: {
-        type: Boolean,
-        computed: 'computePathIsASubfolderOrFile(pathIsASubfolder, pathIsATestFile)'
-      },
-      liveTestDomain: {
-        type: String,
-        computed: 'computeLiveTestDomain()',
-      },
-      structuredSearch: Object,
-      searchResults: {
-        type: Array,
-        value: [],
-        notify: true,
-      },
-      subtestRowCount: {
-        type: Number,
-        notify: true
-      },
-      testPaths: {
-        type: Set,
-        computed: 'computeTestPaths(searchResults)',
-        notify: true,
-      },
-      displayedNodes: {
-        type: Array,
-        value: [],
-      },
-      displayedTests: {
-        type: Array,
-        computed: 'computeDisplayedTests(path, searchResults)',
-      },
-      displayedTotals: {
-        type: Array,
-        value: [],
-      },
-      metadataMap: Object,
-      labelMap: Object,
-      // Users request to show a diff column.
-      diff: Boolean,
-      diffRun: {
-        type: Object,
-        value: null,
-      },
-      diffURL: {
-        type: String,
-        computed: 'computeDiffURL(testRuns)',
-      },
-      showHistory: {
-        type: Boolean,
-        value: false,
-      },
-      subtestNames: {
-        type: Array,
-        value:[]
-      },
-      resultsLoadFailed: Boolean,
-      noResults: Boolean,
-      editingQuery: {
-        type: Boolean,
-        value: false,
-      },
-      sortCol: {
-        type: Array,
-        value: [],
-      },
-      isPathSorted: {
-        type: Boolean,
-        value: false,
-      },
-      canViewInteropScores: {
-        type: Boolean,
-        value: false
-      },
-      onlyShowDifferences: Boolean,
-      // path => {type, file[, refPath]} simplification.
-      screenshots: Array,
-      triageNotifier: Boolean,
-    };
-  }
+@customElement('wpt-results')
+export class WPTResults extends AmendMetadataMixin(Pluralizer(WPTColors(WPTFlags(PathInfo(LoadingState(TestRunsUIBase)))))) {
+  @property({type: String}) path = '';
+  @property({type: Boolean}) pathIsASubfolderOrFile = false;
+  @property({type: String}) liveTestDomain = '';
+  @property({type: Object}) structuredSearch = {};
+  @property({type: Array}) searchResults = [];
+  @property({type: Number}) subtestRowCount = 0;
+  @property({type: Object}) testPaths = new Set();
+  @property({type: Array}) displayedNodes = [];
+  @property({type: Array}) displayedTests = [];
+  @property({type: Array}) displayedTotals = [];
+  @property({type: Object}) metadataMap = {};
+  @property({type: Object}) labelMap = {};
+  @property({type: Boolean}) diff = false;
+  @property({type: Object}) diffRun = null;
+  @property({type: String}) diffURL = '';
+  @property({type: Boolean}) showHistory = false;
+  @property({type: Array}) subtestNames = [];
+  @property({type: Boolean}) resultsLoadFailed = false;
+  @property({type: Boolean}) noResults = false;
+  @property({type: Boolean}) editingQuery = false;
+  @property({type: Array}) sortCol = [];
+  @property({type: Boolean}) isPathSorted = false;
+  @property({type: Boolean}) canViewInteropScores = false;
+  @property({type: Boolean}) onlyShowDifferences = false;
+  @property({type: Array}) screenshots = [];
+  @property({type: Boolean}) triageNotifier = false;
 
   static get observers() {
     return [
@@ -582,32 +179,43 @@ class WPTResults extends AmendMetadataMixin(Pluralizer(WPTColors(WPTFlags(PathIn
   constructor() {
     super();
     this.onLoadingComplete = () => {
-      this.noResults = !this.resultsLoadFailed
-        && !(this.searchResults && this.searchResults.length);
+      this.noResults =
+        !this.resultsLoadFailed &&
+        !(this.searchResults && this.searchResults.length);
     };
-    this.toggleQueryEdit = () => {
-      this.editingQuery = !this.editingQuery;
-    };
-    this.toggleDiffFilter = () => {
-      this.onlyShowDifferences = !this.onlyShowDifferences;
-      this.refreshDisplayedNodes();
-    };
-    this.dismissToast = e => e.target.closest('paper-toast').close();
     this.reloadPendingMetadata = this.handleReloadPendingMetadata.bind(this);
     this.sortTestName = this.sortTestName.bind(this);
-    this.addEventListener('selected-metadata-changed', this.selectedMetadataChanged);
-    this.addEventListener('metadata-map-changed', this.metadataMapChanged);
-    this.addEventListener('label-map-changed', this.labelMapChanged);
   }
 
   connectedCallback() {
     super.connectedCallback();
-    this.addEventListener('triagemetadata', this.reloadPendingMetadata);
-    this.addEventListener('subtestrows', this.handleGetSubtestRows);
+    this.addEventListener(
+      'selected-metadata-changed',
+      this.selectedMetadataChanged as EventListener
+    );
+    this.addEventListener(
+      'metadata-map-changed',
+      this.metadataMapChanged as EventListener
+    );
+    this.addEventListener(
+      'label-map-changed',
+      this.labelMapChanged as EventListener
+    );
+    this.addEventListener(
+      'triagemetadata',
+      this.reloadPendingMetadata as EventListener
+    );
+    this.addEventListener(
+      'subtestrows',
+      this.handleGetSubtestRows as EventListener
+    );
   }
 
   disconnectedCallback() {
-    this.removeEventListener('triagemetadata', this.reloadPendingMetadata);
+    this.removeEventListener(
+      'triagemetadata',
+      this.reloadPendingMetadata as EventListener
+    );
     super.disconnectedCallback();
   }
 
@@ -1560,7 +1168,639 @@ class WPTResults extends AmendMetadataMixin(Pluralizer(WPTColors(WPTFlags(PathIn
   }
 
   openAmendMetadata() {
-    this.$.amend.open();
+    (this.shadowRoot!.querySelector('#amend') as any).open();
+  }
+
+  toggleQueryEdit() {
+    this.editingQuery = !this.editingQuery;
+  }
+
+  toggleDiffFilter() {
+    this.onlyShowDifferences = !this.onlyShowDifferences;
+    this.refreshDisplayedNodes();
+  }
+
+  dismissToast(e: Event) {
+    (e.target as HTMLElement).closest('paper-toast')!.close();
+  }
+
+  static styles = css`
+    :host {
+      display: block;
+      font-size: 15px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    tr:nth-child(2n),
+    tr.spec {
+      background-color: var(--paper-grey-200);
+    }
+    tr td {
+      padding: 0.25em 0.5em;
+    }
+    tr.spec td {
+      padding: 0.2em 0.5em;
+      border: solid 1px var(--paper-grey-300);
+    }
+    thead {
+      border-bottom: 8px solid white;
+    }
+    th {
+      background: white;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    path-part {
+      vertical-align: bottom;
+    }
+    .path {
+      margin-bottom: 16px;
+    }
+    .path-separator {
+      padding: 0 0.1em;
+      margin: 0 0.2em;
+    }
+    .top,
+    .delta {
+      background-color: var(--paper-grey-200);
+    }
+    span.delta.regressions {
+      color: var(--paper-red-700);
+    }
+    span.delta.passes {
+      color: var(--paper-green-700);
+    }
+    td.none {
+      visibility: hidden;
+    }
+    td.numbers {
+      white-space: nowrap;
+      color: black;
+    }
+    td[triage] {
+      cursor: pointer;
+    }
+    td[triage]:hover {
+      opacity: 0.7;
+      box-shadow: 5px 5px 5px;
+    }
+    td[selected] {
+      border: 2px solid #000000;
+    }
+    .totals-row {
+      border-top: 4px solid white;
+      padding: 4px;
+    }
+    .yellow-button {
+      color: var(--paper-yellow-500);
+      margin-left: 32px;
+    }
+    .history {
+      margin: 32px 0;
+      text-align: center;
+    }
+    .history h3 span {
+      color: var(--paper-red-500);
+    }
+    #show-history {
+      background: var(--paper-blue-700);
+      color: white;
+    }
+    .test-type {
+      margin-left: 8px;
+      padding: 4px;
+      border-radius: 4px;
+      background-color: var(--paper-blue-100);
+    }
+    @media (max-width: 1200px) {
+      table tr td:first-child::after {
+        content: '';
+        display: inline-block;
+        vertical-align: top;
+        min-height: 30px;
+      }
+    }
+    .sort-col {
+      border-top: 4px solid white;
+      padding: 4px;
+    }
+    .sort-button {
+      margin-left: -15px;
+    }
+    .view-triage {
+      margin-left: 30px;
+    }
+    .pointer {
+      cursor: help;
+    }
+
+    .channel-area {
+      display: flex;
+      max-width: fit-content;
+      margin-inline: auto;
+      border-radius: 3px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow-elevation-2dp_-_box-shadow);
+    }
+
+    .channel-area > paper-button {
+      margin: 0;
+    }
+
+    .channel-area > paper-button:first-of-type {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+
+    .channel-area > paper-button:last-of-type {
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+    }
+    .unselected {
+      background-color: white;
+    }
+    .selected {
+      background-color: var(--paper-blue-700);
+      color: white;
+    }
+
+    .selected::before {
+      --_size: 1rem;
+      --_half-size: calc(var(--_size) / 2);
+
+      content: '';
+      position: absolute;
+      bottom: calc(var(--_half-size) * -1 + 1px);
+      width: var(--_size);
+      height: var(--_half-size);
+      left: calc(50% - var(--_half-size));
+      background: var(--paper-blue-700);
+      clip-path: polygon(46% 100%, 0 0, 100% 0);
+    }
+  `;
+
+  render() {
+    return html`
+      <paper-toast id="selected-toast" duration="0">
+        <span>${this.triageToastMsg(this.selectedMetadata.length)}</span>
+        <paper-button
+          class="view-triage"
+          @click=${this.openAmendMetadata}
+          ?raised=${this.hasSelections}
+          ?disabled=${!this.hasSelections}
+          >TRIAGE</paper-button
+        >
+      </paper-toast>
+
+      ${this.isInvalidDiffUse(this.diff, this.testRuns)
+        ? html`
+            <paper-toast
+              id="diffInvalid"
+              duration="0"
+              text="'diff' was requested, but is only valid when comparing two runs."
+              opened
+            >
+              <paper-button @click=${this.dismissToast} class="yellow-button"
+                >Close</paper-button
+              >
+            </paper-toast>
+          `
+        : ''}
+
+      <paper-toast
+        id="runsNotInCache"
+        duration="5000"
+        text="One or more of the runs requested is currently being loaded into the cache. Trying again..."
+      ></paper-toast>
+
+      ${this.resultsLoadFailed
+        ? html`
+            <info-banner type="error">
+              Failed to fetch test runs.
+            </info-banner>
+          `
+        : ''}
+      ${this.queryBuilder
+        ? html`
+            <iron-collapse ?opened=${this.editingQuery}>
+              <test-runs-query-builder
+                .query=${this.query}
+                @submit=${this.submitQuery}
+              >
+              </test-runs-query-builder>
+            </iron-collapse>
+          `
+        : ''}
+      ${this.testRuns
+        ? html`
+            ${this.pathIsATestFile
+              ? html`
+                  <test-file-results
+                    .testRuns=${this.testRuns}
+                    .subtestRowCount=${this.subtestRowCount}
+                    .path=${this.path}
+                    .structuredSearch=${this.structuredSearch}
+                    .labels=${this.labels}
+                    .products=${this.products}
+                    .diffRun=${this.diffRun}
+                    ?is-triage-mode=${this.isTriageMode}
+                    .metadataMap=${this.metadataMap}
+                  >
+                  </test-file-results>
+                `
+              : ''}
+            ${this.shouldDisplayToggle(
+              this.canViewInteropScores,
+              this.pathIsATestFile
+            )
+              ? html`
+                  <div class="channel-area">
+                    <paper-button
+                      id="toggleInterop"
+                      class=${this.interopButtonClass(this.view)}
+                      @click=${this.clickInterop}
+                      >Interop View</paper-button
+                    >
+                    <paper-button
+                      id="toggleDefault"
+                      class=${this.defaultButtonClass(this.view)}
+                      @click=${this.clickDefault}
+                      >Default View</paper-button
+                    >
+                  </div>
+                `
+              : ''}
+            ${!this.pathIsATestFile
+              ? html`
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Path</th>
+                        ${repeat(
+                          this.testRuns,
+                          testRun => html`
+                            <!-- Repeats for as many different browser test runs are available -->
+                            <th>
+                              <test-run
+                                .testRun=${testRun}
+                                show-source
+                                show-platform
+                              ></test-run>
+                            </th>
+                          `
+                        )}
+                        ${this.diffRun
+                          ? html`
+                              <th>
+                                <test-run .testRun=${this.diffRun}></test-run>
+                                <paper-icon-button
+                                  icon="filter-list"
+                                  @click=${this.toggleDiffFilter}
+                                  title="Toggle filtering to only show differences"
+                                ></paper-icon-button>
+                              </th>
+                            `
+                          : ''}
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      ${this.displayedNodes
+                        ? html`
+                            <tr class="sort-col">
+                              <td>
+                                <paper-icon-button
+                                  class="sort-button"
+                                  src=${this.getSortIcon(this.isPathSorted)}
+                                  @click=${this.sortTestName}
+                                  aria-label="Sort the test name column"
+                                ></paper-icon-button>
+                              </td>
+                              ${repeat(
+                                this.sortCol,
+                                (sortItem, index) => html`
+                                  <td>
+                                    <paper-icon-button
+                                      class="sort-button"
+                                      src=${this.getSortIcon(sortItem)}
+                                      @click=${() => this.sortTestResults(index)}
+                                      aria-label="Sort the test result column"
+                                    ></paper-icon-button>
+                                  </td>
+                                `
+                              )}
+                            </tr>
+                          `
+                        : ''}
+                      ${repeat(
+                        this.displayedNodes,
+                        node => html`
+                          <tr>
+                            <td
+                              @click=${(e: Event) =>
+                                this.handleTriageSelect(null, node, null)(e)}
+                              @mouseover=${(e: Event) =>
+                                this.handleTriageHover(null, node, null)(e)}
+                            >
+                              <path-part
+                                .prefix="/results"
+                                .path=${node.path}
+                                .query=${this.query}
+                                ?is-dir=${node.isDir}
+                                ?is-triage-mode=${this.isTriageMode}
+                              >
+                              </path-part>
+                              ${this.shouldDisplayMetadata(
+                                null,
+                                node.path,
+                                this.metadataMap
+                              )
+                                ? html`
+                                    <a
+                                      href=${this.getMetadataUrl(
+                                        null,
+                                        node.path,
+                                        this.metadataMap
+                                      )}
+                                      target="_blank"
+                                      ><iron-icon
+                                        class="bug"
+                                        icon="bug-report"
+                                      ></iron-icon
+                                    ></a>
+                                  `
+                                : ''}
+                              ${this.shouldDisplayTestLabel(
+                                node.path,
+                                this.labelMap
+                              )
+                                ? html`
+                                    <iron-icon
+                                      class="bug"
+                                      icon="label"
+                                      title=${this.getTestLabelTitle(
+                                        node.path,
+                                        this.labelMap
+                                      )}
+                                    ></iron-icon>
+                                  `
+                                : ''}
+                            </td>
+
+                            ${repeat(
+                              this.testRuns,
+                              (testRun, index) => html`
+                                <td
+                                  class="numbers ${this.testResultClass(
+                                    node,
+                                    index,
+                                    testRun,
+                                    'passes'
+                                  )}"
+                                  @click=${(e: Event) =>
+                                    this.handleTriageSelect(
+                                      index,
+                                      node,
+                                      testRun
+                                    )(e)}
+                                  @mouseover=${(e: Event) =>
+                                    this.handleTriageHover(
+                                      index,
+                                      node,
+                                      testRun
+                                    )(e)}
+                                >
+                                  ${this.diffRun
+                                    ? html`
+                                        <span
+                                          class="passes ${this.testResultClass(
+                                            node,
+                                            index,
+                                            testRun,
+                                            'passes'
+                                          )}"
+                                          >${this.getNodeResultDataByPropertyName(
+                                            node,
+                                            index,
+                                            testRun,
+                                            'subtest_passes'
+                                          )}</span
+                                        >
+                                        /
+                                        <span
+                                          class="total ${this.testResultClass(
+                                            node,
+                                            index,
+                                            testRun,
+                                            'total'
+                                          )}"
+                                          >${this.getNodeResultDataByPropertyName(
+                                            node,
+                                            index,
+                                            testRun,
+                                            'subtest_total'
+                                          )}</span
+                                        >
+                                      `
+                                    : ''}
+                                  ${!this.diffRun
+                                    ? html`
+                                        <span
+                                          class="passes ${this.testResultClass(
+                                            node,
+                                            index,
+                                            testRun,
+                                            'passes'
+                                          )}"
+                                          >${this.getNodeResult(
+                                            node,
+                                            index
+                                          )}</span
+                                        >
+                                        ${this.shouldDisplayHarnessWarning(
+                                          node,
+                                          index
+                                        )
+                                          ? html`
+                                              <span
+                                                class="pointer"
+                                                title="Harness ${this.getStatusDisplay(
+                                                  node,
+                                                  index
+                                                )}"
+                                              >
+                                                ⚠️</span
+                                              >
+                                            `
+                                          : ''}
+                                      `
+                                    : ''}
+                                  ${this.shouldDisplayMetadata(
+                                    index,
+                                    node.path,
+                                    this.metadataMap
+                                  )
+                                    ? html`
+                                        <a
+                                          href=${this.getMetadataUrl(
+                                            index,
+                                            node.path,
+                                            this.metadataMap
+                                          )}
+                                          target="_blank"
+                                          ><iron-icon
+                                            class="bug"
+                                            icon="bug-report"
+                                          ></iron-icon
+                                        ></a>
+                                      `
+                                    : ''}
+                                </td>
+                              `
+                            )}
+                            ${this.diffRun
+                              ? html`
+                                  <td
+                                    class="numbers ${this.testResultClass(
+                                      node,
+                                      -1,
+                                      this.diffRun,
+                                      'passes'
+                                    )}"
+                                  >
+                                    ${node.diff
+                                      ? html`
+                                          <span class="delta passes"
+                                            >${this.getNodeResultDataByPropertyName(
+                                              node,
+                                              -1,
+                                              this.diffRun,
+                                              'passes'
+                                            )}</span
+                                          >
+                                          /
+                                          <span class="delta regressions"
+                                            >${this.getNodeResultDataByPropertyName(
+                                              node,
+                                              -1,
+                                              this.diffRun,
+                                              'regressions'
+                                            )}</span
+                                          >
+                                          /
+                                          <span class="delta total"
+                                            >${this.getNodeResultDataByPropertyName(
+                                              node,
+                                              -1,
+                                              this.diffRun,
+                                              'total'
+                                            )}</span
+                                          >
+                                        `
+                                      : ''}
+                                  </td>
+                                `
+                              : ''}
+                          </tr>
+                        `
+                      )}
+                      ${this.shouldDisplayTotals(this.displayedTotals, this.diffRun)
+                        ? html`
+                            <tr class="totals-row">
+                              <td>
+                                <code><strong>${this.getTotalText()}</strong></code>
+                              </td>
+                              ${repeat(
+                                this.displayedTotals,
+                                columnTotal => html`
+                                  <td
+                                    class="numbers ${this.getTotalsClass(
+                                      columnTotal
+                                    )}"
+                                  >
+                                    <span
+                                      class="total ${this.getTotalsClass(
+                                        columnTotal
+                                      )}"
+                                      >${this.getTotalDisplay(
+                                        columnTotal
+                                      )}</span
+                                    >
+                                  </td>
+                                `
+                              )}
+                            </tr>
+                          `
+                        : ''}
+                    </tbody>
+                  </table>
+
+                  ${this.noResults
+                    ? html`
+                        <info-banner type="info">
+                          No results.
+                        </info-banner>
+                      `
+                    : ''}
+                `
+              : ''}
+          `
+        : ''}
+      ${this.pathIsATestFile
+        ? html`
+            <div class="history">
+              ${!this.showHistory
+                ? html`
+                    <paper-button
+                      id="show-history"
+                      @click=${this.showHistoryClicked}
+                      raised
+                    >
+                      Show history timeline
+                    </paper-button>
+                  `
+                : ''}
+              ${this.showHistory
+                ? html`
+                    <h3>
+                      History:
+                    </h3>
+                    ${this.pathIsATestFile
+                      ? html`
+                          <test-results-history-timeline
+                            .path=${this.path}
+                            ?show-test-history=${this.showHistory}
+                            .subtestNames=${this.subtestNames}
+                          >
+                          </test-results-history-timeline>
+                        `
+                      : ''}
+                  `
+                : ''}
+            </div>
+          `
+        : ''}
+      ${this.displayMetadata
+        ? html`
+            <wpt-metadata
+              .products=${this.displayedProducts}
+              .path=${this.path}
+              .searchResults=${this.searchResults}
+              .metadataMap=${this.metadataMap}
+              .labelMap=${this.labelMap}
+              ?triage-notifier=${this.triageNotifier}
+            ></wpt-metadata>
+          `
+        : ''}
+      <wpt-amend-metadata
+        id="amend"
+        .selectedMetadata=${this.selectedMetadata}
+        .path=${this.path}
+      ></wpt-amend-metadata>
+    `;
   }
 
   shouldDisplayTestLabel(testname, labelMap) {

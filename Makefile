@@ -60,7 +60,7 @@ github_action_go_setup:
 	fi
 # NOTE: We prune before generate, because node_modules are embedded into the
 # binary (and part of the build).
-go_build: git mockgen github_action_go_setup webapp_node_modules_prod
+go_build: git mockgen github_action_go_setup webapp_build
 	go generate ./...
 	# Check all packages without producing any output.
 	go build -v ./...
@@ -143,7 +143,7 @@ _go_webdriver_test: var-BROWSER java go_build xvfb geckodriver chromedriver dev_
 
 # NOTE: psmisc includes killall, needed by wct.sh
 web_components_test: xvfb firefox chrome webapp_node_modules_all psmisc
-	util/wct.sh $(USE_FRAME_BUFFER)
+	cd webapp && npm test
 
 dev_appserver_deps: gcloud-app-engine-go gcloud-cloud-datastore-emulator gcloud-beta java
 
@@ -323,6 +323,9 @@ webapp_node_modules_all: node
 
 webapp_node_modules_prod: webapp_node_modules_all
 	cd webapp; npm prune --production
+
+webapp_build: webapp_node_modules_all
+	cd webapp; npm run build
 
 xvfb:
 	if [[ "$(USE_FRAME_BUFFER)" == "true" && "$$(which Xvfb)" == "" ]]; then \

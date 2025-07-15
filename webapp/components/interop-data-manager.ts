@@ -85,13 +85,38 @@ const BROWSER_INFO = {
 // fetches the CSV data, processes it into sets of datatables, and then caches
 // those tables for later use by the dashboard.
 class InteropDataManager {
-  constructor(year, isMobileScoresView) {
+  private year: string;
+  private isMobileScoresView: boolean;
+  private _dataLoaded: Promise<[void, void]>;
+  private stableDatatables!: Map<string, google.visualization.DataTable>;
+  private experimentalDatatables!: Map<string, google.visualization.DataTable>;
+  private stableBrowserVersions!: string[][];
+  private experimentalBrowserVersions!: string[][];
+  private investigationScores!: any[];
+  private investigationWeight!: number;
+  private previousInvestigationScores!: any[];
+  private previousInvestigationTotalScore!: number;
+  private investigationTotalScore!: number;
+  private focusAreas!: any;
+  private browsers!: string[];
+  private csvURL!: string;
+  private validYears!: string[];
+  private validMobileYears!: string[];
+  private focusAreasList!: string[];
+  private tableSections!: any[];
+  private browserInfo!: any[];
+  private numBrowsers!: number;
+  private summaryFeatureName!: string;
+  private issueURL!: string;
+  private focusAreasDescriptionLink!: string;
+
+  constructor(year: string, isMobileScoresView: boolean) {
     this.year = year;
     this.isMobileScoresView = isMobileScoresView;
     // The data is loaded when the year data is obtained and the csv is loaded and parsed.
     this._dataLoaded = this.fetchYearData()
-    // The year data is needed for parsing the csv.
-      .then(async() => {
+      // The year data is needed for parsing the csv.
+      .then(async () => {
         await load();
         return Promise.all([
           this._loadCsv('stable'),
@@ -152,23 +177,29 @@ class InteropDataManager {
   // Fetches the datatable for the given feature and stable/experimental state.
   // This will wait as needed for the underlying CSV data to be loaded and
   // processed before returning the datatable.
-  async getDataTable(feature, stable) {
+  async getDataTable(
+    feature: string,
+    stable: boolean
+  ): Promise<google.visualization.DataTable | undefined> {
     await this._dataLoaded;
-    return stable ?
-      this.stableDatatables.get(feature) :
-      this.experimentalDatatables.get(feature);
+    return stable
+      ? this.stableDatatables.get(feature)
+      : this.experimentalDatatables.get(feature);
   }
 
   // Calculates the investigation score to be displayed in the summary bubble
   // and saves it as an instance variable for easy reference.
-  #calcInvestigationTotalScore(investigationScores) {
+  private _calcInvestigationTotalScore(investigationScores: any[]): number {
     if (!investigationScores) {
-      return undefined;
+      return 0;
     }
     // Get the last listed score for each category and sum them.
     const totalScore = investigationScores.reduce((sum, area) => {
       if (area.scores_over_time.length > 0) {
-        return sum + area.scores_over_time[area.scores_over_time.length - 1].score;
+        return (
+          sum +
+          area.scores_over_time[area.scores_over_time.length - 1].score
+        );
       }
       return sum;
     }, 0.0);
@@ -178,15 +209,17 @@ class InteropDataManager {
   // Fetches the most recent scores from the datatables for display as summary
   // numbers and tables. Scores are represented as an array of objects, where
   // the object is a feature->score mapping.
-  async getMostRecentScores(stable) {
+  async getMostRecentScores(stable: boolean): Promise<any[]> {
     await this._dataLoaded;
     // We don't aggregate stable results for mobile.
     if (this.isMobileScoresView && stable) {
-      return {};
+      return [];
     }
     // TODO: Don't get the data from the data tables (which are for the graphs)
     // but instead extract it separately when parsing the CSV.
-    const dataTables = stable ? this.stableDatatables : this.experimentalDatatables;
+    const dataTables = stable
+      ? this.stableDatatables
+      : this.experimentalDatatables;
 
     const scores = this.browsers.map(() => {
       return {};
@@ -196,13 +229,19 @@ class InteropDataManager {
 
     for (const feature of [this.summaryFeatureName, ...this.focusAreasList]) {
       const dataTable = dataTables.get(feature);
+      if (!dataTable) {
+        continue;
+      }
       // Assumption: The rows are ordered by dates with the most recent entry last.
       const lastRowIndex = dataTable.getNumberOfRows() - 1;
 
       // The order of these needs to be in sync with the markup.
       scores.forEach((score, i) => {
-        const tableName = (i === scores.length - 1) ? 'Interop' : this.browserInfo[i].tableName;
-        score[feature] = dataTable.getValue(lastRowIndex, dataTable.getColumnIndex(tableName)) * 1000;
+        const tableName =
+          i === scores.length - 1 ? 'Interop' : this.browserInfo[i].tableName;
+        score[feature] =
+          dataTable.getValue(lastRowIndex, dataTable.getColumnIndex(tableName)) *
+          1000;
       });
     }
     return scores;
@@ -211,18 +250,18 @@ class InteropDataManager {
   // Fetches a list of browser versions for stable or experimental. This is a
   // helper method for building tooltip actions; the returned list has one
   // entry per row in the corresponding datatables.
-  async getBrowserVersions(stable) {
+  async getBrowserVersions(stable: boolean): Promise<string[][]> {
     await this._dataLoaded;
-    return stable ?
-      this.stableBrowserVersions :
-      this.experimentalBrowserVersions;
+    return stable
+      ? this.stableBrowserVersions
+      : this.experimentalBrowserVersions;
   }
 
   // Loads the unified CSV file for either stable or experimental, and
   // processes it into the set of datatables provided by this class. Will
   // ultimately set either this.stableDatatables or this.experimentalDatatables
   // with a map of {feature name --> datatable}.
-  async _loadCsv(label) {
+  async _loadCsv(label: 'stable' | 'experimental'): Promise<void> {
     // We don't aggregate stable results for mobile.
     if (this.isMobileScoresView && label === 'stable') {
       return;
@@ -231,23 +270,24 @@ class InteropDataManager {
     const url = this.csvURL.replace('{stable|experimental}', label);
     const csvLines = await fetchCsvContents(url, this.isMobileScoresView);
 
-    const features = [this.summaryFeatureName,
-      ...this.focusAreasList];
+    const features = [this.summaryFeatureName, ...this.focusAreasList];
 
-    const tooltipBrowserNames = [];
-    const dataTables = new Map(features.map(feature => {
-      const dataTable = new window.google.visualization.DataTable();
-      dataTable.addColumn('date', 'Date');
-      for (const browserInfo of this.browserInfo) {
-        tooltipBrowserNames.push(browserInfo.tooltipName);
-        dataTable.addColumn('number', browserInfo.tableName);
-        dataTable.addColumn({ type: 'string', role: 'tooltip' });
-      }
-      dataTable.addColumn('number', 'Interop');
-      tooltipBrowserNames.push('Interop');
-      dataTable.addColumn({type: 'string', role: 'tooltip'});
-      return [feature, dataTable];
-    }));
+    const tooltipBrowserNames: string[] = [];
+    const dataTables = new Map(
+      features.map(feature => {
+        const dataTable = new window.google.visualization.DataTable();
+        dataTable.addColumn('date', 'Date');
+        for (const browserInfo of this.browserInfo) {
+          tooltipBrowserNames.push(browserInfo.tooltipName);
+          dataTable.addColumn('number', browserInfo.tableName);
+          dataTable.addColumn({type: 'string', role: 'tooltip'});
+        }
+        dataTable.addColumn('number', 'Interop');
+        tooltipBrowserNames.push('Interop');
+        dataTable.addColumn({type: 'string', role: 'tooltip'});
+        return [feature, dataTable];
+      })
+    );
     // We store a lookup table of browser versions to help with the
     // 'Show browser changelog' tooltip action.
     const browserVersions = tooltipBrowserNames.map(() => {
@@ -278,13 +318,15 @@ class InteropDataManager {
       const date = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
 
       // Initialize a new row for each feature, with the date column set.
-      const newRows = new Map(features.map(feature => {
-        return [feature, [date]];
-      }));
+      const newRows = new Map(
+        features.map(feature => {
+          return [feature, [date] as (string | number | Date)[]];
+        })
+      );
 
       // Now handle each of the browsers. For each there is a version column,
       // then the scores for each of the features.
-      for (let i = 1; i < csvValues.length; i += (numFocusAreas + 1)) {
+      for (let i = 1; i < csvValues.length; i += numFocusAreas + 1) {
         const browserIdx = Math.floor(i / (numFocusAreas + 1));
         const browserName = tooltipBrowserNames[browserIdx];
         const version = csvValues[i];
@@ -292,7 +334,8 @@ class InteropDataManager {
 
         let testScore = 0.0;
         // Mobile csv does not have an Interop version column to account for.
-        const versionOffset = (this.isMobileScoresView && browserName === 'Interop') ? 0 : 1;
+        const versionOffset =
+          this.isMobileScoresView && browserName === 'Interop' ? 0 : 1;
 
         headers.forEach((feature, j) => {
           let score = 0;
@@ -301,8 +344,8 @@ class InteropDataManager {
             throw new Error(`Expected score in 0-1000 range, got ${score}`);
           }
           const tooltip = this.createTooltip(browserName, version, score);
-          newRows.get(feature).push(score / 1000);
-          newRows.get(feature).push(tooltip);
+          newRows.get(feature)!.push(score / 1000);
+          newRows.get(feature)!.push(tooltip);
 
           // Only aggregate the score to the total score if it's a category that
           // counts toward the total browser score.
@@ -314,25 +357,34 @@ class InteropDataManager {
         // Count up the number of focus areas that count toward the browser score
         // to handle averaging.
         const numCountedFocusAreas = this.focusAreasList.filter(
-          k => this.focusAreas[k].countsTowardScore).length;
+          k => this.focusAreas[k].countsTowardScore
+        ).length;
         testScore /= numCountedFocusAreas;
 
         // Handle investigation scoring if applicable.
         const [investigationScore, investigationWeight] =
-          this.#getInvestigationScoreAndWeight(date);
+          this._getInvestigationScoreAndWeight(date);
 
         // Factor in the the investigation score and weight as specified.
-        const summaryScore = Math.floor(testScore * (1 - investigationWeight) +
-                                        investigationScore * investigationWeight);
+        const summaryScore = Math.floor(
+          testScore * (1 - investigationWeight) +
+            investigationScore * investigationWeight
+        );
 
-        const summaryTooltip = this.createTooltip(browserName, version, summaryScore);
-        newRows.get(this.summaryFeatureName).push(summaryScore / 1000);
-        newRows.get(this.summaryFeatureName).push(summaryTooltip);
+        const summaryTooltip = this.createTooltip(
+          browserName,
+          version,
+          summaryScore
+        );
+        newRows
+          .get(this.summaryFeatureName)!
+          .push(summaryScore / 1000);
+        newRows.get(this.summaryFeatureName)!.push(summaryTooltip);
       }
 
       // Push the new rows onto the corresponding datatable.
       newRows.forEach((row, feature) => {
-        dataTables.get(feature).addRow(row);
+        dataTables.get(feature)!.addRow(row);
       });
     });
 
@@ -347,7 +399,7 @@ class InteropDataManager {
     }
   }
 
-  #getInvestigationScoreAndWeight(date) {
+  private _getInvestigationScoreAndWeight(date: Date): [number, number] {
     if (!this.investigationScores) {
       return [0, 0];
     }
@@ -355,7 +407,8 @@ class InteropDataManager {
     for (const info of this.investigationScores) {
       // Find the investigation score at the given date.
       const entry = info.scores_over_time.findLast(
-        entry => date >= new Date(entry.date));
+        (entry: any) => date >= new Date(entry.date)
+      );
       if (entry) {
         totalInvestigationScore += entry.score;
       }
@@ -364,7 +417,7 @@ class InteropDataManager {
     return [totalInvestigationScore, this.investigationWeight];
   }
 
-  createTooltip(browser, version, score) {
+  createTooltip(browser: string, version: string, score: number): string {
     // The score is an integer in the range 0-1000, representing a percentage
     // with one decimal point.
     return `${score / 10}% passing \n${browser} ${version}`;
@@ -372,15 +425,18 @@ class InteropDataManager {
 
   // Data Manager holds all year-specific properties. This method is a generic
   // accessor for those properties.
-  getYearProp(prop) {
+  getYearProp(prop: string): any {
     if (prop in this) {
-      return this[prop];
+      return (this as any)[prop];
     }
     return '';
   }
 }
 
-async function fetchCsvContents(url, isMobileScoresView) {
+async function fetchCsvContents(
+  url: string,
+  isMobileScoresView: boolean
+): Promise<string[]> {
   const csvResp = await fetch(url);
   if (!csvResp.ok) {
     throw new Error(`Fetching chart csv data failed: ${csvResp.status}`);
